@@ -88,7 +88,7 @@ class PeopleTracker:
         looking = _due(self.cameras, list(frames), every)
         # Uploaded and resized once: the same tensors serve the pass that follows people
         # and the pass that starts them on a look frame, so a look frame is encoded once.
-        ready = self.engine._prepared(frames, [c for c in frames if self.cameras[c].people or c in looking])
+        ready = self.engine.prepared(frames, [c for c in frames if self.cameras[c].people or c in looking])
 
         # The engine predicts this frame for every person on every camera, in one batch.
         for c, masks in self.engine.step({c: ready[c] for c in frames if self.cameras[c].people}).items():

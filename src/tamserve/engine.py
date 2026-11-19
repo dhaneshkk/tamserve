@@ -157,10 +157,20 @@ class Engine:
         Seeding stays uncompiled. A compiled engine keeps PyTorch's float32 matmul
         setting (torch.set_float32_matmul_precision) as it was when it was built.
     gpu_masks: return masks on the GPU instead of copying them to the CPU.
+
+    An engine is not thread-safe: call it from one thread. While a step runs it
+    points the predictor's modules at its own forwards, so two engines built on one
+    predictor must not step at the same time either; give each thread its own.
+    Separate processes, as a Router uses, are not affected.
     """
 
     def __init__(self, predictor, *, bf16: bool = True, exact: bool = False, compile: bool | str = False,
                  gpu_masks: bool = False):
+        if exact and compile:
+            # exact= promises stock's results bit for bit, which compiled kernels do not
+            # give; and exact= passes all of a step's objects at once, in batches larger
+            # than the sizes compiled up front, so a live step would stop to compile.
+            raise ValueError("exact=True and compile= cannot be used together")
         m = predictor
         # The memory layout below mirrors stock for this configuration only.
         if not (m.num_maskmem > 0 and m.use_obj_ptrs_in_encoder and m.memory_temporal_stride_for_eval == 1
@@ -204,7 +214,8 @@ class Engine:
         # With stock's own fallback switch, PyTorch picks the kernel and each is one graph.
         # _use() sets the switch while the compiled modules run and puts it back after.
         self._attention, self._pinned = transformer, transformer.ALLOW_ALL_KERNELS
-        torch._dynamo.config.cache_size_limit = 64
+        # Raised, never lowered: the setting is process-wide and others may need more.
+        torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
         # The mode for calls of up to _GRAPH_ROWS rows, and for larger ones.
         modes = ("max-autotune", "max-autotune-no-cudagraphs") if mode is True else (mode, mode)
 
@@ -339,7 +350,8 @@ class Engine:
         live = {c for c, _ in starting + following}
         busy = [c for c in frames if c in live]
         if not busy:
-            return out  # nothing to follow: the frames are not even read
+            self._last = None  # nothing to follow: the frames are not read, and older features go
+            return out
         # Objects of one age side by side, so each memory-attention call is as large as it can be.
         following.sort(key=lambda k: (len(self.tracks[k].mem), len(self.tracks[k].ptr)))
         frames = self._prepared(frames, busy)
@@ -370,6 +382,12 @@ class Engine:
             _matmul(outside)
             if collecting:
                 gc.enable()
+
+    def prepared(self, frames: dict, cams=None) -> dict:
+        """Upload and resize raw frames once, for several calls: camera id -> prepare()
+        output, for `cams` (default: all of them). Pass the result to step() and then
+        add(), and add() does not encode the frames again."""
+        return self._prepared(frames, list(frames) if cams is None else list(cams))
 
     def _prepared(self, frames, busy):
         """The busy cameras' frames as prepare() gives them. Raw frames are resized

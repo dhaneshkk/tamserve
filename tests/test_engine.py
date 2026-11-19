@@ -372,3 +372,8 @@ def test_masks_can_stay_on_the_gpu(tmp_path):
     for i, f in enumerate(frames):
         on_gpu, on_cpu = (e.step({"cam": f}, {"cam": seeds} if i == 0 else None)["cam"][1] for e in (a, b))
         assert on_gpu.is_cuda and torch.equal(on_gpu.cpu(), on_cpu)
+
+
+def test_exact_and_compile_are_refused_together():
+    with pytest.raises(ValueError, match="exact"):
+        Engine(object(), exact=True, compile=True)  # refused before the predictor is even read

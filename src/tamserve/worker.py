@@ -34,6 +34,8 @@ _COMMANDS = ("add_camera", "remove_camera", "start", "stop")
 _ASIDE = "tamserve: catching up"  # the camera id an object is followed under while it catches up
 _SILENCE = 15.0  # seconds without a word from the router before a worker ends its session
 _FAILURES = 3    # failed steps in a row before a worker decides its GPU is broken and stops
+_GREETING = 10.0  # seconds a newcomer has to prove the token and say hello
+_GREETERS = 8     # newcomers greeted at once
 _NETWORK = ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://", "tcp://", "srt://")
 
 
@@ -465,14 +467,18 @@ def main(argv=None):
 
     arrivals: queue.Queue = queue.Queue()
     taken = threading.Lock()   # held while a router is connected
-    greeters = threading.BoundedSemaphore(8)  # handshakes under way at once
+    greeters = threading.BoundedSemaphore(_GREETERS)  # handshakes under way at once
 
     def greet(conn, peer):
         """A newcomer: it must prove it knows the token and speak this protocol, and it is
         turned away at once if another router is connected."""
         try:
-            wire.prove_worker(conn, token)
-            kind, protocol, _ = wire.recv(conn, timeout=5)
+            # The whole greeting, not just each wait for bytes, has a deadline: a peer that
+            # sends half a message and stalls would otherwise hold this thread for good, and
+            # _GREETERS of them would keep every router out.
+            with wire.deadline(conn, _GREETING):
+                wire.prove_worker(conn, token)
+                kind, protocol, _ = wire.recv(conn, timeout=5)
             if kind != "hello" or protocol != wire.PROTOCOL:
                 wire.send(conn, ("refused", f"this worker speaks protocol {wire.PROTOCOL} (tamserve {about['version']}) "
                                             f"and the router {protocol}: install the same tamserve on both"))

@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import socket
@@ -140,6 +141,37 @@ def test_limits_and_short_tokens():
         wire.recv(b)  # more arrays than a message may carry
     with pytest.raises(ValueError):
         Router(workers=["127.0.0.1:9"], token="short")  # guessable from a recorded handshake
+
+
+def test_an_array_index_outside_the_message_is_malformed():
+    a, b = Pipe()
+    for i in (1, -1, True, "0"):
+        a.send_bytes(('{"n": 1, "m": {"T": "array", "i": %s, "dtype": "uint8", "shape": [1]}}'
+                      % json.dumps(i)).encode())
+        a.send_bytes(b"x")
+        with pytest.raises(ValueError):
+            wire.recv(b)
+
+
+def test_a_peer_that_stalls_mid_handshake_is_cut_off():
+    from multiprocessing.connection import Listener
+    listener, outcome = Listener(("127.0.0.1", 0), family="AF_INET"), {}
+
+    def worker():
+        conn, began = listener.accept(), time.monotonic()
+        try:
+            with wire.deadline(conn, 1):
+                wire.prove_worker(conn, wire.check_token(TOKEN))
+        except TimeoutError:
+            outcome["after"] = time.monotonic() - began
+
+    greeter = threading.Thread(target=worker, daemon=True)
+    greeter.start()
+    with socket.create_connection(listener.address) as peer:
+        peer.recv(36)                                   # the worker's challenge
+        peer.sendall((64).to_bytes(4, "big") + b"x" * 10)  # announces 64 bytes, sends 10, stalls
+        greeter.join(5)
+    assert 1 <= outcome["after"] < 3
 
 
 def test_a_worker_turns_away_what_it_cannot_serve(workers, monkeypatch):
