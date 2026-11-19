@@ -10,6 +10,8 @@ It serves the way the rest of tamserve does:
 - **ByteTrack's matching.** Confident finds are matched first, weak finds may only confirm an object already followed, and a new object must be seen by a second look before it is shown (except on a camera's first look).
 - **Gray in, one channel.** Frames go in as the gray picture itself: a camera's gray stream, or the Y plane of its colour stream.
 
+There is also a Rust port, [`rust/`](../rust/README.md): a single binary that gives the same ids and boxes on the same frames, with about half the memory overhead and no Python.
+
 ## Install
 
 On a machine with PyTorch already, `pip install "tamserve[cpu]"`. On an edge box, leave PyTorch out:
