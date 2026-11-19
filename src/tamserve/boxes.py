@@ -414,7 +414,8 @@ class BoxTracker:
         """ByteTrack's association, per class: confident finds against everything
         followed, weak finds against what is left, new objects on trial last."""
         first = cam.since_look is None
-        for label in set(labels.tolist()) | {o.label for o in cam.objects.values()}:
+        # Classes in order, so new objects are numbered the same way on every run (and as the Rust port does).
+        for label in sorted(set(labels.tolist()) | {o.label for o in cam.objects.values()}):
             mine = labels == label
             b, s = boxes[mine], scores[mine]
             ids = [t for t, o in cam.objects.items() if o.label == label]
