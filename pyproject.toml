@@ -23,6 +23,10 @@ dependencies = [
 # Tracker and PeopleTracker find things with Meta's SAM 3: its own licence, and weights gated on Hugging Face.
 # SAM 3 imports psutil without declaring it.
 sam3 = ["sam3>=0.1.4", "psutil"]
+# BoxTracker: YOLOX on the CPU through OpenVINO (tamserve.boxes). It does not import torch, so on an edge box
+# `pip install --no-deps tamserve` beside these is enough. onnx makes the 1-channel model, nncf quantises it.
+cpu = ["openvino>=2024.0", "numpy>=1.26", "pillow>=9.4.0", "opencv-python-headless>=4.8"]
+cpu-tools = ["onnx>=1.14", "nncf>=2.10"]
 
 [project.urls]
 Repository = "https://github.com/aryamandarda/tamserve"
@@ -31,7 +35,7 @@ Repository = "https://github.com/aryamandarda/tamserve"
 tamserve = "tamserve.worker:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "opencv-python-headless>=4.8"]  # OpenCV: the router tests read cameras by address
+dev = ["pytest>=8", "opencv-python-headless>=4.8", "openvino>=2024.0", "onnx>=1.14"]  # OpenCV: the router tests read cameras by address; OpenVINO and onnx: test_boxes
 bench = ["psutil", "opencv-python-headless>=4.8"]
 
 [build-system]
@@ -52,6 +56,7 @@ packages = ["src/tamserve"]
 [tool.hatch.build.targets.sdist]
 # Everything needed to build, test and benchmark it; the demo video and GIF stay on GitHub.
 only-include = ["src", "tests", "bench", "scripts", "docs/how-it-works.md", "docs/results.md", "docs/demo.md",
+                "docs/cpu-boxes.md",
                 "README.md", "LICENSE", "uv.lock"]
 
 [tool.pytest.ini_options]
