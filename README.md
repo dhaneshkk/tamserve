@@ -272,6 +272,25 @@ SAM 3 can also track people through a video by itself. Here are the two side by 
 | someone out of sight to keep their number for longer | `PeopleTracker(engine, hold=90)`: the number of frames a person no look has seen is still followed. The default is 30. |
 | your own detector in place of SAM 3 | `PeopleTracker(engine, finder=my_detector)`: anything that takes a list of frames and returns a list of masks for each |
 
+### Boxes on the CPU
+
+For edge boxes with no NVIDIA GPU, such as an Intel N100, `BoxTracker` finds and follows boxes with YOLOX-Nano on the CPU, through OpenVINO. It serves the same way: one copy of the model for every camera, looks spread across rounds, and a Kalman filter carrying each box between looks. Frames go in gray, and the model takes one channel: `gray_model()` turns YOLOX's own ONNX file into one, without changing what it computes. It needs neither PyTorch nor SAM.
+
+```python
+from tamserve.boxes import BoxTracker, Detector, gray_model
+
+gray_model("yolox_nano.onnx", "yolox_nano_gray.onnx")  # once; YOLOX's released model, 3.7 MB
+tracker = BoxTracker(Detector("yolox_nano_gray.onnx", threads=3, classes=("person",)), look_every=3)
+
+while True:
+    found = tracker.step({name: camera.take() for name, camera in cameras.items()})  # H x W uint8 gray frames
+    # found["gate"] is {1: Found(box=(left, top, right, bottom), score=0.83, label="person"), ...}
+```
+
+A Rust port in [`rust/`](https://github.com/dhaneshkk/tamserve/blob/rust-boxes/rust/README.md) gives the same ids and boxes on the same frames, as one binary with no Python.
+
+Against one process per camera, one shared process used 3.6 times less memory and a little less CPU at 8 cameras, and kept every camera at its frame rate. [Boxes on the CPU](https://github.com/dhaneshkk/tamserve/blob/cpu-boxes/docs/cpu-boxes.md) has the measurements, the settings and the limits, and [a one-cell notebook](https://github.com/dhaneshkk/tamserve/blob/cpu-boxes/notebooks/cpu_boxes.ipynb) runs it all.
+
 ### Options
 
 | if you want | do this |
@@ -373,6 +392,7 @@ What to expect in practice:
 | [How it works](https://github.com/aryamandarda/tamserve/blob/main/docs/how-it-works.md) | the model, continuous batching, each speed change and why it is exact, where the code is |
 | [Results](https://github.com/aryamandarda/tamserve/blob/main/docs/results.md) | every measurement with its command, start-up times, the per-stage profile, what was tried and dropped |
 | [Several GPUs](https://github.com/aryamandarda/tamserve/blob/main/docs/several-gpus.md) | what a router sends back, what happens when a camera or a worker fails, workers on other machines |
+| [Boxes on the CPU](https://github.com/dhaneshkk/tamserve/blob/cpu-boxes/docs/cpu-boxes.md) | `BoxTracker`: YOLOX-Nano through OpenVINO on gray frames, its settings, CPU and memory against one process per camera, INT8 |
 | [The demo video](https://github.com/aryamandarda/tamserve/blob/main/docs/demo.md) | what each scene shows, how it was recorded, footage sources |
 
 ## Credits and licence
