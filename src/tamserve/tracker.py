@@ -38,7 +38,7 @@ from tamserve.finder import Finder
 _SAME = 0.1       # overlap (IoU) from which a found outline and a followed object are the same object
 _REPEAT = 0.1     # overlap from which a found outline repeats a more confident one
 _RESTART = 0.8    # confidence from which a followed object starts again from the found outline
-_TRIAL = 15       # frames a new object is on trial for
+_TRIAL = 15       # frames a new object is on trial for, at the least (see _trial)
 _MISSED = 8 / 15  # the share of a trial's looks that must miss the object for it to be removed
 # Cameras that do not move (still=True).
 _BLOCK = 16       # a picture is compared by the mean colour of each block of this many pixels a side
@@ -82,6 +82,15 @@ def _first_pick(followed: dict, outlines: list, confidence: list, start: float, 
     ids.update({weak[k]: t for k, t in _match(left, [outlines[i] for i in weak], least, device).items()})
     kept = [i for i in range(len(outlines)) if i in ids or confidence[i] >= start]
     return kept, {k: ids[i] for k, i in enumerate(kept) if i in ids}
+
+
+def _trial(every: int) -> tuple:
+    """(frames a new object is on trial for, looks of the trial that must miss it for it
+    to be removed) on a camera that looks every `every` frames. SAM 3's rule is 8 misses
+    in 15 looks, at one look a frame. A trial always spans at least two looks: on a
+    camera that looks rarely, one bad look would otherwise throw away a real object."""
+    frames = max(_TRIAL, 2 * every)
+    return frames, max(1, math.ceil(_MISSED * (frames // every)))
 
 
 def _thumbnail(frame) -> np.ndarray:
@@ -194,7 +203,7 @@ class Tracker:
         thumbs = {c: _thumbnail(f) for c, f in frames.items()} if self.still else {}
         every = {c: _interval(self.look_every, c, 3) for c in self.cameras}
         looking = _due(self.cameras, list(frames), every,
-                       lambda c: not self.still or self._changed(self.cameras[c], thumbs[c]))
+                       lambda c: not self.still or self._changed(self.cameras[c], thumbs[c], every[c]))
         follow = [c for c in frames if self.cameras[c].objects]
         if self.still:
             for c in list(follow):
@@ -207,7 +216,7 @@ class Tracker:
                 self.cameras[c].followed = thumbs[c]
         # Uploaded and resized once: the same tensors serve the pass that follows objects
         # and the pass that starts them on a look frame, so a look frame is encoded once.
-        ready = self.engine._prepared(frames, [c for c in frames if c in follow or c in looking])
+        ready = self.engine.prepared(frames, [c for c in frames if c in follow or c in looking])
 
         # The engine predicts this frame for every object on every camera, in one batch.
         for c, masks in self.engine.step({c: ready[c] for c in follow}).items():
@@ -223,7 +232,7 @@ class Tracker:
         found = self.finder([frames[c] for c in looking], wanted) if looking else []
         for k, c in enumerate(looking):
             cam = self.cameras[c]
-            misses = max(1, math.ceil(_MISSED * (_TRIAL // every[c])))  # looks, of a trial's
+            trial, misses = _trial(every[c])
             for t in [t for t, name in cam.name.items() if name not in wanted[k]]:
                 self._forget(c, t)  # the camera is no longer asked for it
             for prompt in wanted[k]:  # each prompt's outlines meet only that prompt's objects
@@ -239,7 +248,7 @@ class Tracker:
                     if t not in cam.objects or sure[j] >= _RESTART:
                         seeds.setdefault(c, {})[t] = cam.objects[t] = outlines[j]
                     cam.unseen[t] = 0
-                for t in [t for t in live if t not in ids.values() and cam.frame - cam.born[t] <= _TRIAL]:
+                for t in [t for t in live if t not in ids.values() and cam.frame - cam.born[t] <= trial]:
                     cam.missed[t] = cam.missed.get(t, 0) + 1
                     if cam.missed[t] >= misses:  # a new object the looks keep missing was a false find
                         self._forget(c, t)
@@ -284,10 +293,10 @@ class Tracker:
         for known in (cam.objects, cam.unseen, cam.name, cam.born, cam.missed):
             known.pop(t, None)
 
-    def _changed(self, cam, thumb) -> bool:
+    def _changed(self, cam, thumb, every) -> bool:
         """Whether a still camera's picture changed enough since its last look to look again."""
         if cam.looked is None or cam.since_look >= _STILL_LOOK:
             return True
-        if any(cam.frame - born < _TRIAL for born in cam.born.values()):
+        if any(cam.frame - born < _trial(every)[0] for born in cam.born.values()):
             return True  # something new is on trial, and only looks can judge it
         return _moved(thumb, cam.looked)

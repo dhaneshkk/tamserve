@@ -297,7 +297,7 @@ Against one process per camera, one shared process used 3.6 times less memory an
 |---|---|
 | a different model | `build_video_predictor("cuda", "sam2.1-tiny")`. The same works with `-small`, `-base-plus` and `-large`. |
 | masks left on the GPU instead of copied to the CPU | `Engine(predictor, gpu_masks=True)` |
-| masks identical to stock's, bit for bit | `Engine(predictor, exact=True)`, and pass each frame through `prepare(frame)` first: it resizes on the CPU exactly as stock does, where the engine's own resize on the GPU can be off by 1 in a pixel's value |
+| masks identical to stock's, bit for bit | `Engine(predictor, exact=True)`, without `compile`, and pass each frame through `prepare(frame)` first: it resizes on the CPU exactly as stock does, where the engine's own resize on the GPU can be off by 1 in a pixel's value |
 
 ### Compiling for speed
 

@@ -6,11 +6,15 @@ message, each side proves that it knows the shared token, without sending it.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import math
+import os
 import secrets
+import socket
+import threading
 from typing import NamedTuple
 
 import numpy as np
@@ -88,7 +92,7 @@ def recv(conn, timeout: float | None = None):
             if size > _MESSAGE_MAX:
                 raise ValueError
         return _from(header["m"], blobs)
-    except (KeyError, TypeError, ValueError, RecursionError, UnicodeDecodeError) as e:
+    except (KeyError, IndexError, TypeError, ValueError, RecursionError, UnicodeDecodeError) as e:
         raise ValueError("a malformed message") from e
 
 
@@ -121,7 +125,11 @@ def _from(x, blobs):
     kind = x["T"]
     if kind == "array":
         i, dtype, shape = x["i"], x["dtype"], x["shape"]
-        if dtype not in _DTYPES or not all(isinstance(s, int) and s >= 0 for s in shape):
+        # bool is an int to Python: refuse it, and any index that is not one of this message's arrays
+        if type(i) is not int or not 0 <= i < len(blobs):
+            raise ValueError
+        if dtype not in _DTYPES or not isinstance(shape, list) \
+                or not all(type(s) is int and s >= 0 for s in shape):
             raise ValueError
         a = np.frombuffer(blobs[i], dtype=dtype)
         if a.size != math.prod(shape):
@@ -146,6 +154,49 @@ def check_token(token: str | bytes) -> bytes:
 
 def _proof(token: bytes, role: bytes, challenge: bytes) -> bytes:
     return hmac.new(token, role + challenge, hashlib.sha256).digest()
+
+
+@contextlib.contextmanager
+def deadline(conn, seconds: float):
+    """Cut `conn` off if the block inside has not finished within `seconds`.
+
+    poll() only says that some bytes have arrived; recv_bytes() then waits, with no
+    limit, for the whole message its length header announced. A peer that sends a
+    header and stalls would hold the reading thread for ever, so past the deadline
+    the socket is shut down, which wakes that read with an error."""
+    lock, finished = threading.Lock(), []
+
+    def cut():
+        with lock:
+            if finished:
+                return
+            finished.append(False)
+        try:
+            with socket.socket(fileno=os.dup(conn.fileno())) as s:  # a second handle on the same socket
+                s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # already closed
+
+    timer = threading.Timer(seconds, cut)
+    timer.daemon = True
+    timer.start()
+    def over():
+        timer.cancel()
+        with lock:
+            cut_off = bool(finished)
+            finished.append(True)
+        return cut_off
+
+    try:
+        yield
+    except BaseException as e:
+        # Whatever the cut-off read raised (EOFError, OSError, or a PermissionError
+        # made from one), the reason is the deadline.
+        if over():
+            raise TimeoutError(f"the other side took more than {seconds:g} s") from e
+        raise
+    if over():
+        raise TimeoutError(f"the other side took more than {seconds:g} s")
 
 
 def _exactly(conn, size, timeout):

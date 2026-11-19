@@ -157,6 +157,20 @@ def test_a_new_object_most_looks_miss_is_removed(pred):
     assert ("cam", 2) not in tracker.engine.tracks and tracker.names("cam") == {1: "red"}
 
 
+def test_on_a_camera_that_looks_rarely_one_missed_look_does_not_remove_a_new_object(pred):
+    frames = _frames(96, 128, 20, TWO)
+    tracker = _tracker(pred, ColourFinder(once=("yellow",)), look_every=8)
+    shown = [sorted(tracker.step({"cam": f})["cam"]) for f in frames]
+    assert shown[15] == [1, 2]  # missed by the look on frame 8: one bad look is not enough
+    assert shown[16] == [1]     # missed by both looks of its trial
+
+
+def test_a_trial_spans_at_least_two_looks():
+    from tamserve.tracker import _trial
+    assert [_trial(k) for k in (1, 3, 5)] == [(15, 8), (15, 3), (15, 2)]  # as SAM 3's rule gives
+    assert [_trial(k) for k in (8, 15, 30)] == [(16, 2), (30, 2), (60, 2)]
+
+
 def test_an_object_no_look_sees_is_forgotten_after_hold(pred):
     # Yellow is gone after frame 3. The engine may keep a mask for it or not; either way
     # it is forgotten once no look has seen it for longer than hold.

@@ -144,11 +144,12 @@ class _Remote(_Outbox):
         host, _, port = address.rpartition(":")
         self.device, self.conn = address, Client((host, int(port)), family="AF_INET")
         try:
-            wire.prove_router(self.conn, token)
-            sent = time.time()
-            wire.send(self.conn, ("hello", wire.PROTOCOL, sent))
-            kind, about = wire.recv(self.conn, timeout=30)
-            back = time.time()
+            with wire.deadline(self.conn, 60):  # a worker that stalls mid-message cannot hang the router
+                wire.prove_router(self.conn, token)
+                sent = time.time()
+                wire.send(self.conn, ("hello", wire.PROTOCOL, sent))
+                kind, about = wire.recv(self.conn, timeout=30)
+                back = time.time()
             if kind == "refused":
                 raise RuntimeError(f"the worker at {address} turned this router away: {about}")
             if kind != "ready":
