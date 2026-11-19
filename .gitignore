@@ -21,3 +21,4 @@ __pycache__/
 
 # Tools the benchmarks fetch
 third_party
+rust/target/

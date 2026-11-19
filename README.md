@@ -287,6 +287,8 @@ while True:
     # found["gate"] is {1: Found(box=(left, top, right, bottom), score=0.83, label="person"), ...}
 ```
 
+A Rust port in [`rust/`](https://github.com/dhaneshkk/tamserve/blob/rust-boxes/rust/README.md) gives the same ids and boxes on the same frames, as one binary with no Python.
+
 Against one process per camera, one shared process used 3.6 times less memory and a little less CPU at 8 cameras, and kept every camera at its frame rate. [Boxes on the CPU](https://github.com/dhaneshkk/tamserve/blob/cpu-boxes/docs/cpu-boxes.md) has the measurements, the settings and the limits, and [a one-cell notebook](https://github.com/dhaneshkk/tamserve/blob/cpu-boxes/notebooks/cpu_boxes.ipynb) runs it all.
 
 ### Options
